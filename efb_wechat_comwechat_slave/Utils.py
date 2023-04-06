@@ -5,7 +5,7 @@ import requests as requests
 import re
 import json
 import yaml
-from typing import Dict , Any
+from typing import Dict , Any , IO
 import pilk
 import pydub
 import os
@@ -25,7 +25,7 @@ def load_config(path : str) -> Dict[str, None]:
         config: Dict[str, Any] = d
     return config
 
-def download_file(url: str, retry: int = 3) -> tempfile:
+def download_file(url: str, retry: int = 3) -> IO:
     """
     A function that downloads files from given URL
     Remember to close the file once you are done with the file!
@@ -35,12 +35,16 @@ def download_file(url: str, retry: int = 3) -> tempfile:
     count = 1
     while True:
         try:
-            file = tempfile.NamedTemporaryFile()
-            r = requests.get(url, stream=True, timeout=10)
-            for chunk in r.iter_content(chunk_size=1024):
-                if chunk:
-                    file.write(chunk)
-                    file.flush()
+            # https://stackoverflow.com/questions/23212435/permission-denied-to-write-to-my-temporary-file
+            # Tempfile on windows cannot be reopened using filename
+            filename = os.path.join(tempfile.gettempdir(), os.urandom(24).hex())
+            with open(filename, 'wb') as f:
+                r = requests.get(url, stream=True, timeout=10)
+                for chunk in r.iter_content(chunk_size=1024):
+                    if chunk:
+                        f.write(chunk)
+                        f.flush()
+            file = open(filename, 'rb')
         except Exception as e:
             logging.getLogger(__name__).warning(f"Error occurred when downloading {url}. {e}")
             if count >= retry:
@@ -51,7 +55,7 @@ def download_file(url: str, retry: int = 3) -> tempfile:
             break
     return file
 
-def wechatimagedecode( file : str) -> tempfile:
+def wechatimagedecode( file : str) -> IO:
     """
     代码来源 https://github.com/zhangxiaoyang/WechatImageDecoder
     """
@@ -79,20 +83,10 @@ def wechatimagedecode( file : str) -> tempfile:
         buf = bytearray(f.read())
     file_type, magic = guess_encoding(buf)
 
-    ret_file = tempfile.NamedTemporaryFile()
-    with open(ret_file.name , 'wb') as f:
+    filename = os.path.join(tempfile.gettempdir(), os.urandom(24).hex())
+    with open(filename, 'wb') as f:
         f.write(decode(magic, buf))
-    f.close()
-    return ret_file
-
-def load_local_file_to_temp(file : str) -> tempfile:
-    """
-    从本地文件读取文件到临时文件
-    """
-    ret_file = tempfile.NamedTemporaryFile()
-    with open(file , 'rb') as f:
-        ret_file.write(f.read())
-    f.close()
+    ret_file = open(filename, 'rb') # This will close in ComWechat.py#369,408
     return ret_file
 
 def load_temp_file_to_local(file : tempfile , path : str) -> None:
@@ -103,21 +97,24 @@ def load_temp_file_to_local(file : tempfile , path : str) -> None:
         f.write(file.read())
     f.close()
 
-def convert_silk_to_mp3(file : tempfile) -> tempfile:
+def convert_silk_to_mp3(file : IO) -> IO:
     """
     将silk文件转换为mp3文件
     """
-    f = tempfile.NamedTemporaryFile()
+    filename1 = os.path.join(tempfile.gettempdir(), os.urandom(24).hex())
+    filename2 = os.path.join(tempfile.gettempdir(), os.urandom(24).hex())
     file.seek(0)
     silk_header = file.read(10)
     file.seek(0)
     if b"#!SILK_V3" in silk_header:
-        pilk.decode(file.name, f.name)
+        pilk.decode(file.name, filename1)
         file.close()
-        pydub.AudioSegment.from_raw(file= f , sample_width=2, frame_rate=24000, channels=1) \
-            .export( f , format="ogg", codec="libopus",
-                    parameters=['-vbr', 'on'])
-    return f
+        with(open(filename1 , 'rb')) as inputfile:
+            with(open(filename2 , 'wb')) as outputfile:
+                pydub.AudioSegment.from_raw(file= inputfile , sample_width=2, frame_rate=24000, channels=1) \
+                    .export(outputfile , format="ogg", codec="libopus",
+                            parameters=['-vbr', 'on'])
+    return open(filename2 , 'rb')
 
 
 WC_EMOTICON_CONVERSION = {

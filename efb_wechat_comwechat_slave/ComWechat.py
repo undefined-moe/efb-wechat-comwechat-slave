@@ -66,10 +66,10 @@ class ComWeChatChannel(SlaveChannel):
         self.config = load_config(efb_utils.get_config_path(self.channel_id))
         self.bot = WeChatRobot()
         self.wxid = self.bot.GetSelfInfo()["data"]["wxId"]
-        self.base_path = self.bot.get_base_path()
+        self.base_path = self.config["base_path"] if "base_path" in self.config else self.bot.get_base_path()
         self.dir = self.config["dir"]
-        if not self.dir.endswith("/"):
-            self.dir += "/"
+        if not self.dir.endswith(os.path.sep):
+            self.dir += os.path.sep
         ChatMgr.slave_channel = self
 
         @self.bot.on("self_msg")
@@ -480,12 +480,14 @@ class ComWeChatChannel(SlaveChannel):
             pass     # todo
 
         if msg.type == MsgType.Voice:
-            f = tempfile.NamedTemporaryFile(prefix='voice_message_', suffix=".mp3")
-            AudioSegment.from_ogg(msg.file.name).export(f, format="mp3")
-            msg.file = f
-            msg.file.name = "语音留言.mp3"
+            inputfile = os.path.join(tempfile.gettempdir(), "voice_message_" + os.urandom(24).hex() + ".ogg")
+            outputfile = os.path.join(tempfile.gettempdir(), "voice_message_" + os.urandom(24).hex() + ".mp3")
+            load_temp_file_to_local(msg.file, inputfile)
+            AudioSegment.from_ogg(inputfile).export(outputfile, format="mp3")
+            msg.file = open(outputfile, "rb")
+            # msg.file.name = "语音留言.mp3"
             msg.type = MsgType.Video
-            msg.filename = f.name.split("/")[-1]
+            msg.filename = os.path.basename(outputfile)
         
         if msg.type in [MsgType.Text]:
             if msg.text.startswith('/changename'):
@@ -579,21 +581,24 @@ class ComWeChatChannel(SlaveChannel):
         elif msg.type in [MsgType.Link]:
             self.bot.SendText(wxid = chat_uid , msg = msg.text)
         elif msg.type in [MsgType.Image , MsgType.Sticker]:
-            name = msg.file.name.replace("/tmp/", "")
+            name = os.path.basename(msg.file.name)
             local_path =f"{self.dir}{self.wxid}/{name}"
             load_temp_file_to_local(msg.file, local_path)
-            img_path = self.base_path + "\\" + self.wxid + "\\" + local_path.split("/")[-1]
+            img_path = self.base_path + "\\" + self.wxid + "\\" + name
             res = self.bot.SendImage(receiver = chat_uid , img_path = img_path)
             self.delete_file[local_path] = int(time.time())
             if msg.text:
                 self.bot.SendText(wxid = chat_uid , msg = msg.text)
         elif msg.type in [MsgType.File , MsgType.Video]:
-            name = msg.file.name.replace("/tmp/", "")
+            name = os.path.basename(msg.file.name)
             local_path = f"{self.dir}{self.wxid}/{name}"
             load_temp_file_to_local(msg.file, local_path)
-            file_path = self.base_path + "\\" + self.wxid + "\\" + local_path.split("/")[-1]
+            file_path = self.base_path + "\\" + self.wxid + "\\" + name
             if msg.filename:
-                os.rename(local_path , f"{self.dir}{self.wxid}/{msg.filename}")
+                try:
+                    os.rename(local_path , f"{self.dir}{self.wxid}/{msg.filename}")
+                except:
+                    os.replace(local_path , f"{self.dir}{self.wxid}/{msg.filename}")
                 local_path = f"{self.dir}{self.wxid}/{msg.filename}"
                 file_path = self.base_path + "\\" + self.wxid + "\\" + msg.filename
             res = self.bot.SendFile(receiver = chat_uid , file_path = file_path)
@@ -603,7 +608,7 @@ class ComWeChatChannel(SlaveChannel):
             if msg.type == MsgType.Video:
                 res["msg"] = 1
         elif msg.type in [MsgType.Animation]:
-            name = msg.file.name.replace("/tmp/", "")
+            name = os.path.basename(msg.file.name)
             local_path = f"{self.dir}{self.wxid}/{name}"
             load_temp_file_to_local(msg.file, local_path)
             file_path = self.base_path + "\\" + self.wxid + "\\" + local_path.split("/")[-1]

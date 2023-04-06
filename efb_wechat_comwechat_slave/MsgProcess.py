@@ -46,17 +46,15 @@ def MsgProcess(msg : dict , chat) -> Message:
 
     elif msg["type"] == "share":
         if ("FileStorage" in msg["filepath"]) and ("Cache" not in msg["filepath"]):
-            file = load_local_file_to_temp(msg["filepath"])
-            return efb_file_wrapper(file , msg["filepath"].split("/")[-1])
+            return efb_file_wrapper(open(msg["filepath"], 'rb'), os.path.basename(msg["filepath"]))
         return efb_share_link_wrapper(msg['message'])
 
     elif msg["type"] == "voice":
-        file = convert_silk_to_mp3(load_local_file_to_temp(msg["filepath"]))
+        file = convert_silk_to_mp3(open(msg["filepath"], 'rb'))
         return efb_voice_wrapper(file , file.name + ".ogg")
 
     elif msg["type"] == "video":
-        file = load_local_file_to_temp(msg["filepath"])
-        return efb_video_wrapper(file)
+        return efb_video_wrapper(open(msg["filepath"], 'rb'))
     
     elif msg["type"] == "location":
         return efb_location_wrapper(msg["message"])
